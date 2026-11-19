@@ -2,7 +2,7 @@
 
 Backend AI Personal Trainer: log olahraga, log makanan dari foto (estimasi kalori lewat 9Router), summary dan rekomendasi harian, reminder email.
 
-Stack: NestJS 11, Prisma 6 (MySQL / TiDB Cloud, client tanpa Rust engine lewat `@prisma/adapter-mariadb`), Vercel Blob, SMTP, Vercel Cron.
+Stack: NestJS 11, Prisma 6 (MySQL / TiDB Cloud), Vercel Blob, SMTP, Vercel Cron.
 
 ## Setup lokal
 
@@ -14,7 +14,7 @@ npm run db:seed           # 25 jenis olahraga + nilai MET
 npm run start:dev         # http://localhost:3000/api/v1
 ```
 
-Untuk TiDB Cloud, tambahkan `DB_SSL=true`.
+Untuk TiDB Cloud, `DATABASE_URL` harus diakhiri `?sslaccept=strict`.
 
 ## Endpoint
 

@@ -1,8 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { EXERCISE_TYPES } from '../src/exercise/met';
-import { mariaDbAdapter } from '../src/prisma/adapter';
 
-const prisma = new PrismaClient({ adapter: mariaDbAdapter() });
+const prisma = new PrismaClient();
 
 async function main() {
   for (const t of EXERCISE_TYPES) {
