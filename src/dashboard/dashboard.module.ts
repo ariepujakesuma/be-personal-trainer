@@ -10,7 +10,8 @@ import {
 } from '@nestjs/common';
 import { CurrentUser, JwtAuthGuard } from '../common/auth';
 import type { AuthUser } from '../common/auth';
-import { dateOnly, dayRange, isDateString, localDate } from '../common/dates';
+import { addDays, ageOn, dateOnly, dayRange, isDateString, localDate } from '../common/dates';
+import { ACTIVITY_FACTOR, bmr } from '../profile/targets';
 import { PrismaService } from '../prisma/prisma.service';
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -69,6 +70,63 @@ export class DashboardService {
       hasAnyLog: meals.length > 0 || exercises.length > 0 || Boolean(weight),
     };
   }
+
+  /**
+   * Inputs for the weight projection. Averages cover the last 7 complete days (today is
+   * still being logged). Intake is averaged over days that have confirmed meals, since an
+   * unlogged day is unknown, not zero; exercise is averaged over all 7 days.
+   */
+  async projection(userId: string, timeZone: string) {
+    const profile = await this.prisma.profile.findUnique({ where: { userId } });
+    if (!profile) throw new NotFoundException('Profil belum diisi');
+    const today = localDate(timeZone);
+    const start = dayRange(addDays(today, -7), timeZone).start;
+    const end = dayRange(today, timeZone).start;
+
+    const [weight, comp, meals, burn] = await Promise.all([
+      this.prisma.weightLog.findFirst({ where: { userId }, orderBy: { date: 'desc' } }),
+      this.prisma.weightLog.findFirst({ where: { userId, bodyFatPct: { not: null } }, orderBy: { date: 'desc' } }),
+      this.prisma.meal.findMany({
+        where: { userId, status: 'confirmed', eatenAt: { gte: start, lt: end } },
+        select: { eatenAt: true, totalCalories: true },
+      }),
+      this.prisma.exerciseLog.aggregate({
+        where: { userId, performedAt: { gte: start, lt: end } },
+        _sum: { caloriesBurned: true },
+      }),
+    ]);
+
+    const loggedDays = new Set(meals.map((m) => localDate(timeZone, m.eatenAt))).size;
+    const missing: ('bodyComposition' | 'meals')[] = [];
+    if (!comp) missing.push('bodyComposition');
+    if (loggedDays === 0) missing.push('meals');
+
+    const age = ageOn(profile.birthDate, today);
+    const weightKg = weight?.weightKg ?? null;
+    const tdee =
+      weightKg == null
+        ? null
+        : bmr({ sex: profile.sex, age, heightCm: profile.heightCm, weightKg }) * ACTIVITY_FACTOR[profile.activityLevel];
+
+    return {
+      ready: missing.length === 0,
+      missing,
+      sex: profile.sex,
+      age,
+      heightCm: profile.heightCm,
+      activityFactor: ACTIVITY_FACTOR[profile.activityLevel],
+      weightKg,
+      weightDate: weight?.date.toISOString().slice(0, 10) ?? null,
+      bodyFatPct: comp?.bodyFatPct ?? null,
+      bodyFatDate: comp?.date.toISOString().slice(0, 10) ?? null,
+      loggedDays,
+      avgIntake: loggedDays ? Math.round(meals.reduce((s, m) => s + m.totalCalories, 0) / loggedDays) : null,
+      avgBurn: Math.round((burn._sum.caloriesBurned ?? 0) / 7),
+      targetCalories: profile.targetCalories,
+      targetDeficit: tdee == null ? null : Math.round(tdee - profile.targetCalories),
+      targetProteinG: profile.targetProteinG,
+    };
+  }
 }
 
 @Controller('dashboard')
@@ -81,6 +139,11 @@ export class DashboardController {
     const day = date ?? localDate(user.timezone);
     if (!isDateString(day)) throw new BadRequestException('Format tanggal YYYY-MM-DD');
     return this.dashboard.day(user.id, user.timezone, day);
+  }
+
+  @Get('projection')
+  projection(@CurrentUser() user: AuthUser) {
+    return this.dashboard.projection(user.id, user.timezone);
   }
 }
 
