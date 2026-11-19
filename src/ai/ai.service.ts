@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { extractJson } from './json';
+import { parseChatBody } from './response';
 
 type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 
@@ -12,12 +13,6 @@ export interface ChatMessage {
 }
 
 export class AiFailedError extends Error {}
-
-interface ChatResponse {
-  model?: string;
-  choices?: { message?: { content?: string | null } }[];
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
-}
 
 /**
  * Single gateway to 9Router (OpenAI-compatible). Feature modules never call
@@ -91,6 +86,7 @@ export class AiService {
           model,
           messages,
           temperature: 0.2,
+          stream: false,
           ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
         }),
         signal: AbortSignal.timeout(Number(this.config.get('AI_TIMEOUT_MS', 50000))),
@@ -99,7 +95,7 @@ export class AiService {
         const body = await response.text();
         throw new AiFailedError(`9Router HTTP ${response.status}: ${body.slice(0, 300)}`);
       }
-      const json = (await response.json()) as ChatResponse;
+      const json = parseChatBody(await response.text());
       await this.logUsage({
         userId,
         feature,
