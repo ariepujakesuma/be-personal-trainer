@@ -20,6 +20,20 @@ import { dateOnly, isDateString, localDate } from '../common/dates';
 import { DashboardModule, DashboardService } from '../dashboard/dashboard.module';
 import { PrismaService } from '../prisma/prisma.service';
 
+const BODY_COMP_LABELS = {
+  bmi: 'bmi',
+  bodyFatPct: 'lemak_tubuh_persen',
+  visceralFat: 'lemak_visceral_level',
+  muscleKg: 'massa_otot_kg',
+  waterPct: 'air_persen',
+  obesityDegreePct: 'derajat_obesitas_persen',
+  bmrKcal: 'bmr_kkal',
+  metabolicAge: 'usia_metabolik',
+  leanMassKg: 'berat_tanpa_lemak_kg',
+  proteinPct: 'protein_persen',
+  boneMassKg: 'massa_tulang_kg',
+} as const;
+
 const MEAL_LABEL = {
   breakfast: 'Sarapan',
   lunch: 'Makan siang',
@@ -49,6 +63,14 @@ export class SummaryService {
       net_kalori: day.net,
       sisa_kalori: day.remaining,
       berat_kg: day.weightKg,
+      komposisi_tubuh: day.weight
+        ? Object.fromEntries(
+            Object.entries(BODY_COMP_LABELS).flatMap(([k, label]) => {
+              const v = day.weight?.[k as keyof typeof BODY_COMP_LABELS];
+              return v == null ? [] : [[label, v]];
+            }),
+          )
+        : null,
       makanan: day.meals
         .filter((m) => m.status === 'confirmed')
         .map((m) => ({

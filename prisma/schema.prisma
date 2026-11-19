@@ -98,6 +98,19 @@ model WeightLog {
   date     DateTime @db.Date
   weightKg Float    @map("weight_kg")
 
+  // Optional smart-scale readings, entered manually
+  bmi              Float?
+  bodyFatPct       Float? @map("body_fat_pct")
+  visceralFat      Float? @map("visceral_fat")
+  muscleKg         Float? @map("muscle_kg")
+  waterPct         Float? @map("water_pct")
+  obesityDegreePct Float? @map("obesity_degree_pct")
+  bmrKcal          Int?   @map("bmr_kcal")
+  metabolicAge     Int?   @map("metabolic_age")
+  leanMassKg       Float? @map("lean_mass_kg")
+  proteinPct       Float? @map("protein_pct")
+  boneMassKg       Float? @map("bone_mass_kg")
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, date])

@@ -9,7 +9,7 @@ Stack: NestJS 11, Prisma 6 (MySQL / TiDB Cloud, client tanpa Rust engine lewat `
 ```bash
 cp .env.example .env      # isi DATABASE_URL, JWT_SECRET, NINEROUTER_*, SMTP_*
 npm install               # menjalankan prisma generate
-npx prisma db push        # buat tabel
+npx prisma db push        # buat / update tabel (jalankan lagi setiap schema berubah)
 npm run db:seed           # 25 jenis olahraga + nilai MET
 npm run start:dev         # http://localhost:3000/api/v1
 ```
@@ -34,7 +34,7 @@ Semua di bawah `/api/v1`. Semua butuh `Authorization: Bearer <jwt>`, kecuali aut
 | PUT | `/meals/:id` | Edit item (item yang diubah ditandai `editedByUser`) |
 | POST | `/meals/:id/confirm` | Masuk ke total harian |
 | DELETE | `/meals/:id` | |
-| POST / GET | `/weights` | F5 |
+| POST / GET | `/weights` | F5, berat + 11 data komposisi tubuh opsional (field kosong/`null` menghapus nilainya) |
 | GET | `/dashboard/daily?date=` | F6 |
 | GET | `/summaries/daily?date=` | F7 |
 | POST | `/summaries/daily/generate?date=` | F7 |

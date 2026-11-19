@@ -64,6 +64,7 @@ export class DashboardService {
       meals,
       exercises,
       weightKg: weight?.weightKg ?? null,
+      weight,
       hasSummary: Boolean(summary),
       hasAnyLog: meals.length > 0 || exercises.length > 0 || Boolean(weight),
     };

@@ -18,7 +18,32 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const dateStr = z.string().refine(isDateString, 'Format tanggal YYYY-MM-DD');
 
-const weightSchema = z.object({
+/** Optional smart-scale readings, entered manually. `null` clears a value. */
+const metric = (min: number, max: number, int = false) => {
+  const n = z.coerce
+    .number({ error: 'Harus berupa angka' })
+    .min(min, `Minimal ${min}`)
+    .max(max, `Maksimal ${max}`);
+  return (int ? n.int('Harus bilangan bulat') : n).nullable().optional();
+};
+
+export const bodyCompSchema = z.object({
+  bmi: metric(10, 80),
+  bodyFatPct: metric(2, 75),
+  visceralFat: metric(1, 60),
+  muscleKg: metric(5, 150),
+  waterPct: metric(20, 80),
+  obesityDegreePct: metric(-60, 200),
+  bmrKcal: metric(500, 5000, true),
+  metabolicAge: metric(10, 100, true),
+  leanMassKg: metric(10, 250),
+  proteinPct: metric(3, 35),
+  boneMassKg: metric(0.5, 10),
+});
+export type BodyComp = z.infer<typeof bodyCompSchema>;
+export const BODY_COMP_FIELDS = Object.keys(bodyCompSchema.shape) as (keyof BodyComp)[];
+
+const weightSchema = bodyCompSchema.extend({
   date: dateStr.optional(),
   weightKg: z.coerce.number().min(25).max(350),
 });
@@ -35,11 +60,16 @@ export class WeightService {
     });
   }
 
-  async upsert(userId: string, date: string, weightKg: number) {
+  /**
+   * `bodyComp` undefined leaves stored readings untouched (e.g. weight set from the profile form);
+   * when given, every reading is written, so a blank field clears it.
+   */
+  async upsert(userId: string, date: string, weightKg: number, bodyComp?: BodyComp) {
+    const comp = bodyComp ? Object.fromEntries(BODY_COMP_FIELDS.map((k) => [k, bodyComp[k] ?? null])) : {};
     return this.prisma.weightLog.upsert({
       where: { userId_date: { userId, date: dateOnly(date) } },
-      create: { userId, date: dateOnly(date), weightKg },
-      update: { weightKg },
+      create: { userId, date: dateOnly(date), weightKg, ...comp },
+      update: { weightKg, ...comp },
     });
   }
 }
@@ -54,7 +84,8 @@ export class WeightController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body(new ZodPipe(weightSchema)) body: z.infer<typeof weightSchema>) {
-    return this.weights.upsert(user.id, body.date ?? localDate(user.timezone), body.weightKg);
+    const { date, weightKg, ...bodyComp } = body;
+    return this.weights.upsert(user.id, date ?? localDate(user.timezone), weightKg, bodyComp);
   }
 
   @Get()
