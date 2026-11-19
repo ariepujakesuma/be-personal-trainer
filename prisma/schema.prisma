@@ -1,0 +1,229 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+  engineType      = "client"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Sex {
+  male
+  female
+}
+
+enum ActivityLevel {
+  sedentary
+  light
+  moderate
+  active
+  very_active
+}
+
+enum Goal {
+  recomp
+  lose
+  maintain
+  gain
+}
+
+enum MealType {
+  breakfast
+  lunch
+  dinner
+  snack
+}
+
+enum MealStatus {
+  draft
+  confirmed
+  needs_manual
+}
+
+enum ExerciseSource {
+  manual
+  ai_parsed
+}
+
+enum Intensity {
+  light
+  moderate
+  vigorous
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  timezone     String   @default("Asia/Jakarta")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  profile          Profile?
+  weightLogs       WeightLog[]
+  exerciseLogs     ExerciseLog[]
+  meals            Meal[]
+  dailySummaries   DailySummary[]
+  notificationLogs NotificationLog[]
+  aiUsageLogs      AiUsageLog[]
+
+  @@map("users")
+}
+
+model Profile {
+  userId               String        @id @map("user_id")
+  sex                  Sex
+  birthDate            DateTime      @map("birth_date") @db.Date
+  heightCm             Float         @map("height_cm")
+  activityLevel        ActivityLevel @map("activity_level")
+  goal                 Goal          @default(recomp)
+  targetCalories       Int           @map("target_calories")
+  targetProteinG       Int           @map("target_protein_g")
+  targetCarbsG         Int           @map("target_carbs_g")
+  targetFatG           Int           @map("target_fat_g")
+  targetsOverridden    Boolean       @default(false) @map("targets_overridden")
+  emailReminderEnabled Boolean       @default(true) @map("email_reminder_enabled")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model WeightLog {
+  id       String   @id @default(cuid())
+  userId   String   @map("user_id")
+  date     DateTime @db.Date
+  weightKg Float    @map("weight_kg")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("weight_logs")
+}
+
+model ExerciseType {
+  id       Int     @id @default(autoincrement())
+  name     String  @unique
+  category String
+  metValue Float   @map("met_value")
+
+  logs ExerciseLog[]
+
+  @@map("exercise_types")
+}
+
+model ExerciseLog {
+  id             String         @id @default(cuid())
+  userId         String         @map("user_id")
+  performedAt    DateTime       @map("performed_at")
+  exerciseTypeId Int?           @map("exercise_type_id")
+  name           String
+  rawText        String?        @map("raw_text") @db.Text
+  durationMin    Int            @map("duration_min")
+  intensity      Intensity      @default(moderate)
+  distanceKm     Float?         @map("distance_km")
+  detailJson     Json?          @map("detail_json")
+  caloriesBurned Int            @map("calories_burned")
+  source         ExerciseSource @default(manual)
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exerciseType ExerciseType? @relation(fields: [exerciseTypeId], references: [id])
+
+  @@index([userId, performedAt])
+  @@map("exercise_logs")
+}
+
+model Meal {
+  id            String     @id @default(cuid())
+  userId        String     @map("user_id")
+  eatenAt       DateTime   @map("eaten_at")
+  mealType      MealType   @map("meal_type")
+  photoUrl      String?    @map("photo_url") @db.Text
+  rawText       String?    @map("raw_text") @db.Text
+  status        MealStatus @default(draft)
+  totalCalories Int        @default(0) @map("total_calories")
+  proteinG      Float      @default(0) @map("protein_g")
+  carbsG        Float      @default(0) @map("carbs_g")
+  fatG          Float      @default(0) @map("fat_g")
+  assumptions   Json?
+  aiModel       String?    @map("ai_model")
+  aiRawJson     Json?      @map("ai_raw_json")
+  createdAt     DateTime   @default(now()) @map("created_at")
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items MealItem[]
+
+  @@index([userId, eatenAt])
+  @@map("meals")
+}
+
+model MealItem {
+  id           String  @id @default(cuid())
+  mealId       String  @map("meal_id")
+  name         String
+  portionDesc  String? @map("portion_desc")
+  grams        Float
+  calories     Int
+  proteinG     Float   @map("protein_g")
+  carbsG       Float   @map("carbs_g")
+  fatG         Float   @map("fat_g")
+  confidence   Float?
+  editedByUser Boolean @default(false) @map("edited_by_user")
+
+  meal Meal @relation(fields: [mealId], references: [id], onDelete: Cascade)
+
+  @@map("meal_items")
+}
+
+model DailySummary {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  date        DateTime @db.Date
+  intakeKcal  Int      @map("intake_kcal")
+  burnKcal    Int      @map("burn_kcal")
+  netKcal     Int      @map("net_kcal")
+  aiJson      Json     @map("ai_json")
+  aiModel     String?  @map("ai_model")
+  generatedAt DateTime @default(now()) @map("generated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("daily_summaries")
+}
+
+model NotificationLog {
+  id     String   @id @default(cuid())
+  userId String   @map("user_id")
+  type   String
+  date   DateTime @db.Date
+  sentAt DateTime @default(now()) @map("sent_at")
+  status String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, date])
+  @@map("notification_logs")
+}
+
+model AiUsageLog {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  feature   String
+  model     String?
+  tokensIn  Int?     @map("tokens_in")
+  tokensOut Int?     @map("tokens_out")
+  latencyMs Int      @map("latency_ms")
+  status    String
+  error     String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("ai_usage_logs")
+}
