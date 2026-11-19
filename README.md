@@ -57,7 +57,7 @@ Kalori olahraga dihitung di backend (MET × kg × jam × faktor intensitas), tid
 
 ## Deploy (Vercel)
 
-`api/index.ts` membungkus aplikasi Nest sebagai satu serverless function, dan `vercel.json` me-rewrite semua path ke function itu. Isi semua env dari `.env.example` di project Vercel.
+Vercel mendeteksi NestJS dari `src/main.ts` (zero-config) dan menjalankannya sebagai satu Vercel Function. Framework Preset di Project Settings harus **NestJS** dan Output Directory dibiarkan kosong. `vercel.json` hanya berisi jadwal cron. Isi semua env dari `.env.example` di project Vercel.
 
 ## Test
 
