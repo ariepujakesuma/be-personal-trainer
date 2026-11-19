@@ -118,6 +118,16 @@ export class WeightController {
     return this.weights.importRows(user.id, body.rows);
   }
 
+  /** Most recent day with any body-composition reading, whatever its date. */
+  @Get('composition/latest')
+  async latestComposition(@CurrentUser() user: AuthUser) {
+    const log = await this.prisma.weightLog.findFirst({
+      where: { userId: user.id, OR: BODY_COMP_FIELDS.map((k) => ({ [k]: { not: null } })) },
+      orderBy: { date: 'desc' },
+    });
+    return { log };
+  }
+
   @Get()
   list(@CurrentUser() user: AuthUser, @Query('from') from?: string, @Query('to') to?: string) {
     const end = to ?? localDate(user.timezone);
