@@ -48,6 +48,13 @@ const weightSchema = bodyCompSchema.extend({
   weightKg: z.coerce.number().min(25).max(350),
 });
 
+const importSchema = z.object({
+  rows: z
+    .array(bodyCompSchema.extend({ date: dateStr, weightKg: z.coerce.number().min(25).max(350) }))
+    .min(1, 'Tidak ada baris untuk diimpor')
+    .max(1000, 'Maksimal 1.000 baris sekali impor'),
+});
+
 @Injectable()
 export class WeightService {
   constructor(private readonly prisma: PrismaService) {}
@@ -72,6 +79,24 @@ export class WeightService {
       update: { weightKg, ...comp },
     });
   }
+
+  /**
+   * Imported rows only set the readings the file has; readings already stored for that day
+   * and missing from the file are kept.
+   */
+  async importRows(userId: string, rows: z.infer<typeof importSchema>['rows']) {
+    await this.prisma.$transaction(
+      rows.map(({ date, weightKg, ...comp }) => {
+        const given = Object.fromEntries(BODY_COMP_FIELDS.filter((k) => comp[k] != null).map((k) => [k, comp[k]]));
+        return this.prisma.weightLog.upsert({
+          where: { userId_date: { userId, date: dateOnly(date) } },
+          create: { userId, date: dateOnly(date), weightKg, ...given },
+          update: { weightKg, ...given },
+        });
+      }),
+    );
+    return { imported: rows.length };
+  }
 }
 
 @Controller('weights')
@@ -86,6 +111,11 @@ export class WeightController {
   create(@CurrentUser() user: AuthUser, @Body(new ZodPipe(weightSchema)) body: z.infer<typeof weightSchema>) {
     const { date, weightKg, ...bodyComp } = body;
     return this.weights.upsert(user.id, date ?? localDate(user.timezone), weightKg, bodyComp);
+  }
+
+  @Post('import')
+  import(@CurrentUser() user: AuthUser, @Body(new ZodPipe(importSchema)) body: z.infer<typeof importSchema>) {
+    return this.weights.importRows(user.id, body.rows);
   }
 
   @Get()
