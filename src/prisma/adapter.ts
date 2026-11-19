@@ -15,6 +15,9 @@ export function mariaDbAdapter(databaseUrl = process.env.DATABASE_URL) {
     password: decodeURIComponent(url.password),
     database: url.pathname.replace(/^\//, ''),
     connectionLimit: Number(process.env.DB_CONNECTION_LIMIT ?? 5),
+    // Fail fast instead of hanging a request when the database is unreachable.
+    connectTimeout: 5000,
+    acquireTimeout: 8000,
     ...(process.env.DB_SSL === 'true' ? { ssl: { rejectUnauthorized: true } } : {}),
   });
 }
