@@ -310,7 +310,10 @@ export class MealService {
   }
 
   private async storePhoto(userId: string, file: Express.Multer.File): Promise<string | null> {
-    if (!this.blobToken()) return null;
+    if (!this.blobToken()) {
+      this.logger.warn('BLOB_READ_WRITE_TOKEN is not set: meal photo not stored');
+      return null;
+    }
     try {
       const ext = file.mimetype.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
       const blob = await putBlob(`meals/${userId}/${Date.now()}.${ext}`, file.buffer, {
