@@ -87,7 +87,9 @@ export class WeightService {
   async importRows(userId: string, rows: z.infer<typeof importSchema>['rows']) {
     await this.prisma.$transaction(
       rows.map(({ date, weightKg, ...comp }) => {
-        const given = Object.fromEntries(BODY_COMP_FIELDS.filter((k) => comp[k] != null).map((k) => [k, comp[k]]));
+        const given = Object.fromEntries(
+          BODY_COMP_FIELDS.filter((k) => comp[k] != null).map((k) => [k, comp[k]]),
+        );
         return this.prisma.weightLog.upsert({
           where: { userId_date: { userId, date: dateOnly(date) } },
           create: { userId, date: dateOnly(date), weightKg, ...given },

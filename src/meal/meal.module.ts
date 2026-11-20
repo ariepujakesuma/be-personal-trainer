@@ -246,16 +246,18 @@ export class MealService {
   async repeat(userId: string, id: string, input: z.infer<typeof repeatSchema>) {
     const src = await this.own(userId, id);
     if (!src.items.length) throw new BadRequestException('Makanan ini belum punya item');
-    const items = src.items.map(({ name, portionDesc, grams, calories, proteinG, carbsG, fatG, confidence }) => ({
-      name,
-      portionDesc,
-      grams,
-      calories,
-      proteinG,
-      carbsG,
-      fatG,
-      confidence,
-    }));
+    const items = src.items.map(
+      ({ name, portionDesc, grams, calories, proteinG, carbsG, fatG, confidence }) => ({
+        name,
+        portionDesc,
+        grams,
+        calories,
+        proteinG,
+        carbsG,
+        fatG,
+        confidence,
+      }),
+    );
     return this.prisma.meal.create({
       data: {
         userId,

@@ -8,6 +8,7 @@ import { CronModule } from './internal/cron.module';
 import { MealModule } from './meal/meal.module';
 import { PrismaModule } from './prisma/prisma.service';
 import { ProfileModule } from './profile/profile.module';
+import { TrainingModule } from './training/training.module';
 import { SummaryModule } from './summary/summary.module';
 import { WeightModule } from './weight/weight.module';
 
@@ -26,6 +27,7 @@ class HealthController {
     AiModule,
     AuthModule,
     ProfileModule,
+    TrainingModule,
     WeightModule,
     ExerciseModule,
     MealModule,

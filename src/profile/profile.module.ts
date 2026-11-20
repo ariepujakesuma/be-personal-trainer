@@ -137,7 +137,10 @@ export class ProfileController {
         _sum: { caloriesBurned: true },
       }),
       this.prisma.weightLog.findMany({
-        where: { userId: user.id, date: { gte: new Date(`${from}T00:00:00Z`), lte: new Date(`${today}T00:00:00Z`) } },
+        where: {
+          userId: user.id,
+          date: { gte: new Date(`${from}T00:00:00Z`), lte: new Date(`${today}T00:00:00Z`) },
+        },
         select: { date: true, weightKg: true },
       }),
       this.weights.latest(user.id, today),
@@ -151,8 +154,12 @@ export class ProfileController {
     }
     const startMs = Date.parse(`${from}T00:00:00Z`);
     const formulaTdee =
-      bmr({ sex: profile.sex, age: ageOn(profile.birthDate, today), heightCm: profile.heightCm, weightKg: latest.weightKg }) *
-      ACTIVITY_FACTOR[profile.activityLevel];
+      bmr({
+        sex: profile.sex,
+        age: ageOn(profile.birthDate, today),
+        heightCm: profile.heightCm,
+        weightKg: latest.weightKg,
+      }) * ACTIVITY_FACTOR[profile.activityLevel];
 
     return calibrate({
       sex: profile.sex,

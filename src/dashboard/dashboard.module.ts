@@ -85,7 +85,10 @@ export class DashboardService {
 
     const [weight, comp, meals, burn] = await Promise.all([
       this.prisma.weightLog.findFirst({ where: { userId }, orderBy: { date: 'desc' } }),
-      this.prisma.weightLog.findFirst({ where: { userId, bodyFatPct: { not: null } }, orderBy: { date: 'desc' } }),
+      this.prisma.weightLog.findFirst({
+        where: { userId, bodyFatPct: { not: null } },
+        orderBy: { date: 'desc' },
+      }),
       this.prisma.meal.findMany({
         where: { userId, status: 'confirmed', eatenAt: { gte: start, lt: end } },
         select: { eatenAt: true, totalCalories: true },
@@ -106,7 +109,8 @@ export class DashboardService {
     const tdee =
       weightKg == null
         ? null
-        : bmr({ sex: profile.sex, age, heightCm: profile.heightCm, weightKg }) * ACTIVITY_FACTOR[profile.activityLevel];
+        : bmr({ sex: profile.sex, age, heightCm: profile.heightCm, weightKg }) *
+          ACTIVITY_FACTOR[profile.activityLevel];
 
     return {
       ready: missing.length === 0,

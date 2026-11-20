@@ -66,7 +66,10 @@ export function calibrate(input: CalibrationInput): Calibration {
   // Rounded first, so the suggestion matches the numbers shown to the user.
   const observedTdee = Math.round(avgIntake - slope * KCAL_PER_KG);
   const base = observedTdee - Math.round(avgBurn);
-  const suggested = Math.max(MIN_CALORIES[input.sex], Math.round((base + GOAL_ADJUSTMENT[input.goal]) / 10) * 10);
+  const suggested = Math.max(
+    MIN_CALORIES[input.sex],
+    Math.round((base + GOAL_ADJUSTMENT[input.goal]) / 10) * 10,
+  );
   // Far from the formula usually means meals were not all logged, not an unusual metabolism.
   const ratio = base / input.formulaTdee;
   return {

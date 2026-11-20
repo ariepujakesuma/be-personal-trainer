@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, @typescript-eslint/require-await -- test fixtures */
 import { calibrate, slopePerDay } from './calibration';
 
 const base = { sex: 'male' as const, goal: 'recomp' as const, formulaTdee: 2400, currentTarget: 2000 };
@@ -10,13 +11,23 @@ describe('calibration', () => {
   });
 
   it('needs 14 logged days and 4 weigh-ins over 14 days', () => {
-    const r = calibrate({ ...base, dailyIntake: Array(10).fill(2000), burnTotal: 0, weights: weights(80, 0) });
+    const r = calibrate({
+      ...base,
+      dailyIntake: Array(10).fill(2000),
+      burnTotal: 0,
+      weights: weights(80, 0),
+    });
     expect(r.status).toBe('not_enough');
   });
 
   it('derives TDEE from intake and the weight trend', () => {
     // Eating 2000 and losing 0.05 kg/day → 2000 + 0.05*7700 = 2385 kcal/day used.
-    const r = calibrate({ ...base, dailyIntake: Array(20).fill(2000), burnTotal: 28 * 200, weights: weights(80, -0.05) });
+    const r = calibrate({
+      ...base,
+      dailyIntake: Array(20).fill(2000),
+      burnTotal: 28 * 200,
+      weights: weights(80, -0.05),
+    });
     expect(r.status).toBe('ready');
     if (r.status === 'not_enough') return;
     expect(r.observedTdee).toBe(2385);
