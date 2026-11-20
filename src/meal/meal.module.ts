@@ -300,18 +300,29 @@ export class MealService {
   ): Promise<{ stream: ReadableStream<Uint8Array>; contentType: string }> {
     const meal = await this.own(userId, id);
     if (!meal.photoUrl) throw new NotFoundException('Tidak ada foto');
-    const blob = await getBlob(meal.photoUrl, { access: 'private', token: this.blobToken() });
+    const auth = this.blobAuth();
+    if (!auth) throw new NotFoundException('Penyimpanan foto belum aktif');
+    const blob = await getBlob(meal.photoUrl, { access: 'private', ...auth });
     if (!blob || blob.statusCode !== 200) throw new NotFoundException('Foto tidak ditemukan');
     return { stream: blob.stream, contentType: blob.blob.contentType };
   }
 
-  private blobToken() {
-    return this.config.get<string>('BLOB_READ_WRITE_TOKEN');
+  /**
+   * Older Blob stores give a read-write token; newer ones connect with a store id and the
+   * deployment's Vercel OIDC token, which the SDK picks up itself.
+   */
+  private blobAuth(): { token: string } | { storeId: string } | null {
+    const token = this.config.get<string>('BLOB_READ_WRITE_TOKEN');
+    if (token) return { token };
+    const storeId =
+      this.config.get<string>('BLOB_STORE_ID') ?? this.config.get<string>('BLOB_READ_WRITE_TOKEN_STORE_ID');
+    return storeId ? { storeId } : null;
   }
 
   private async storePhoto(userId: string, file: Express.Multer.File): Promise<string | null> {
-    if (!this.blobToken()) {
-      this.logger.warn('BLOB_READ_WRITE_TOKEN is not set: meal photo not stored');
+    const auth = this.blobAuth();
+    if (!auth) {
+      this.logger.warn('No Blob credentials (BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID): meal photo not stored');
       return null;
     }
     try {
@@ -320,7 +331,7 @@ export class MealService {
         access: 'private',
         contentType: file.mimetype,
         addRandomSuffix: true,
-        token: this.blobToken(),
+        ...auth,
       });
       return blob.url;
     } catch (err) {
