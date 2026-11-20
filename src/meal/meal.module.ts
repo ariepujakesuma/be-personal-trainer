@@ -312,11 +312,12 @@ export class MealService {
    * deployment's Vercel OIDC token, which the SDK picks up itself.
    */
   private blobAuth(): { token: string } | { storeId: string } | null {
-    const token = this.config.get<string>('BLOB_READ_WRITE_TOKEN');
-    if (token) return { token };
+    // A store id comes from the store connected now; a token may be left over from a deleted one.
     const storeId =
       this.config.get<string>('BLOB_STORE_ID') ?? this.config.get<string>('BLOB_READ_WRITE_TOKEN_STORE_ID');
-    return storeId ? { storeId } : null;
+    if (storeId) return { storeId };
+    const token = this.config.get<string>('BLOB_READ_WRITE_TOKEN');
+    return token ? { token } : null;
   }
 
   private async storePhoto(userId: string, file: Express.Multer.File): Promise<string | null> {
