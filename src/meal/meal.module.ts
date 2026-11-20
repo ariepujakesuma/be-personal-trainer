@@ -62,7 +62,17 @@ const updateSchema = z.object({
 });
 type UpdateInput = z.infer<typeof updateSchema>;
 
+const repeatSchema = z.object({ mealType, eatenAt: z.iso.datetime({ offset: true }).optional() });
+const favoriteSchema = z.object({ favorite: z.boolean() });
+
 const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** Same foods, any portion order: "Nasi, Telur" and "telur, nasi" are one meal. */
+const signature = (items: { name: string }[]) =>
+  items
+    .map((i) => i.name.trim().toLowerCase())
+    .sort()
+    .join('|');
 
 function totals(items: { calories: number; proteinG: number; carbsG: number; fatG: number }[]) {
   return {
@@ -203,6 +213,79 @@ export class MealService {
     });
   }
 
+  /**
+   * Meals worth one-tap re-logging: favorites first, then the most eaten in the last 30 days.
+   * Repeats of the same foods collapse into the most recent one.
+   */
+  async recent(userId: string) {
+    const since = new Date(Date.now() - 30 * 86400000);
+    const meals = await this.prisma.meal.findMany({
+      where: { userId, status: 'confirmed', OR: [{ eatenAt: { gte: since } }, { favorite: true }] },
+      include: { items: true },
+      orderBy: { eatenAt: 'desc' },
+      omit: { aiRawJson: true },
+      take: 300,
+    });
+    const groups = new Map<string, { meal: (typeof meals)[number]; count: number; favorite: boolean }>();
+    for (const meal of meals) {
+      if (!meal.items.length) continue;
+      const key = signature(meal.items);
+      const g = groups.get(key);
+      if (g) {
+        g.count++;
+        g.favorite ||= meal.favorite;
+      } else groups.set(key, { meal, count: 1, favorite: meal.favorite });
+    }
+    return [...groups.values()]
+      .sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.count - a.count)
+      .slice(0, 15)
+      .map(({ meal, count, favorite }) => ({ ...meal, favorite, timesEaten: count }));
+  }
+
+  /** Logs the same foods again as a confirmed meal; the photo is shared, not copied. */
+  async repeat(userId: string, id: string, input: z.infer<typeof repeatSchema>) {
+    const src = await this.own(userId, id);
+    if (!src.items.length) throw new BadRequestException('Makanan ini belum punya item');
+    const items = src.items.map(({ name, portionDesc, grams, calories, proteinG, carbsG, fatG, confidence }) => ({
+      name,
+      portionDesc,
+      grams,
+      calories,
+      proteinG,
+      carbsG,
+      fatG,
+      confidence,
+    }));
+    return this.prisma.meal.create({
+      data: {
+        userId,
+        mealType: input.mealType,
+        eatenAt: input.eatenAt ? new Date(input.eatenAt) : new Date(),
+        photoUrl: src.photoUrl,
+        rawText: src.rawText,
+        status: 'confirmed',
+        assumptions: src.assumptions ?? [],
+        aiModel: src.aiModel,
+        ...totals(items),
+        items: { create: items },
+      },
+      include: { items: true },
+    });
+  }
+
+  /** Favoriting marks every logged copy of the same foods, so it sticks whichever copy is shown. */
+  async setFavorite(userId: string, id: string, favorite: boolean) {
+    const meal = await this.own(userId, id);
+    const key = signature(meal.items);
+    const candidates = await this.prisma.meal.findMany({
+      where: { userId, favorite: !favorite, status: 'confirmed' },
+      select: { id: true, items: { select: { name: true } } },
+    });
+    const ids = [id, ...candidates.filter((m) => signature(m.items) === key).map((m) => m.id)];
+    await this.prisma.meal.updateMany({ where: { userId, id: { in: ids } }, data: { favorite } });
+    return { favorite };
+  }
+
   async own(userId: string, id: string) {
     const meal = await this.prisma.meal.findFirst({ where: { id, userId }, include: { items: true } });
     if (!meal) throw new NotFoundException('Data makanan tidak ditemukan');
@@ -271,6 +354,29 @@ export class MealController {
       orderBy: { eatenAt: 'asc' },
       omit: { aiRawJson: true },
     });
+  }
+
+  @Get('recent')
+  recent(@CurrentUser() user: AuthUser) {
+    return this.meals.recent(user.id);
+  }
+
+  @Post(':id/repeat')
+  repeat(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body(new ZodPipe(repeatSchema)) body: z.infer<typeof repeatSchema>,
+  ) {
+    return this.meals.repeat(user.id, id, body);
+  }
+
+  @Put(':id/favorite')
+  favorite(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body(new ZodPipe(favoriteSchema)) body: z.infer<typeof favoriteSchema>,
+  ) {
+    return this.meals.setFavorite(user.id, id, body.favorite);
   }
 
   @Get(':id')

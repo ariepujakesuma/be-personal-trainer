@@ -84,6 +84,7 @@ model Profile {
   targetCarbsG         Int           @map("target_carbs_g")
   targetFatG           Int           @map("target_fat_g")
   targetsOverridden    Boolean       @default(false) @map("targets_overridden")
+  targetWeightKg       Float?        @map("target_weight_kg")
   emailReminderEnabled Boolean       @default(true) @map("email_reminder_enabled")
   updatedAt            DateTime      @updatedAt @map("updated_at")
 
@@ -164,6 +165,7 @@ model Meal {
   fatG          Float      @default(0) @map("fat_g")
   assumptions   Json?
   aiModel       String?    @map("ai_model")
+  favorite      Boolean    @default(false)
   aiRawJson     Json?      @map("ai_raw_json")
   createdAt     DateTime   @default(now()) @map("created_at")
 

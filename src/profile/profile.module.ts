@@ -1,12 +1,23 @@
-import { Body, Controller, Get, Module, NotFoundException, Put, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Module,
+  NotFoundException,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { z } from 'zod';
 import { CurrentUser, JwtAuthGuard } from '../common/auth';
 import type { AuthUser } from '../common/auth';
-import { ageOn, isDateString, localDate } from '../common/dates';
+import { addDays, ageOn, dayRange, isDateString, localDate } from '../common/dates';
 import { ZodPipe } from '../common/zod.pipe';
 import { PrismaService } from '../prisma/prisma.service';
 import { WeightModule, WeightService } from '../weight/weight.module';
-import { computeTargets } from './targets';
+import { CALIBRATION_WINDOW_DAYS, calibrate } from './calibration';
+import { ACTIVITY_FACTOR, bmr, computeTargets } from './targets';
 
 const profileSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -17,6 +28,7 @@ const profileSchema = z.object({
   activityLevel: z.enum(['sedentary', 'light', 'moderate', 'active', 'very_active']),
   goal: z.enum(['recomp', 'lose', 'maintain', 'gain']).default('recomp'),
   emailReminderEnabled: z.boolean().optional(),
+  targetWeightKg: z.coerce.number().min(25).max(350).nullable().optional(),
   targets: z
     .object({
       calories: z.coerce.number().int().min(800).max(6000),
@@ -95,6 +107,7 @@ export class ProfileController {
       targetFatG: t.fatG,
       targetsOverridden: Boolean(body.targets),
       ...(body.emailReminderEnabled !== undefined ? { emailReminderEnabled: body.emailReminderEnabled } : {}),
+      ...(body.targetWeightKg !== undefined ? { targetWeightKg: body.targetWeightKg } : {}),
     };
     await this.prisma.profile.upsert({
       where: { userId: user.id },
@@ -102,6 +115,70 @@ export class ProfileController {
       update: data,
     });
     return this.get({ ...user, name: body.name ?? user.name });
+  }
+
+  /** Target calories suggested from the last 28 days of real intake and weight. */
+  @Get('calibration')
+  async calibration(@CurrentUser() user: AuthUser) {
+    const profile = await this.prisma.profile.findUnique({ where: { userId: user.id } });
+    if (!profile) throw new NotFoundException('Profil belum diisi');
+    const today = localDate(user.timezone);
+    const from = addDays(today, -CALIBRATION_WINDOW_DAYS);
+    const start = dayRange(from, user.timezone).start;
+    const end = dayRange(today, user.timezone).start;
+
+    const [meals, burn, weights, latest] = await Promise.all([
+      this.prisma.meal.findMany({
+        where: { userId: user.id, status: 'confirmed', eatenAt: { gte: start, lt: end } },
+        select: { eatenAt: true, totalCalories: true },
+      }),
+      this.prisma.exerciseLog.aggregate({
+        where: { userId: user.id, performedAt: { gte: start, lt: end } },
+        _sum: { caloriesBurned: true },
+      }),
+      this.prisma.weightLog.findMany({
+        where: { userId: user.id, date: { gte: new Date(`${from}T00:00:00Z`), lte: new Date(`${today}T00:00:00Z`) } },
+        select: { date: true, weightKg: true },
+      }),
+      this.weights.latest(user.id, today),
+    ]);
+    if (!latest) throw new NotFoundException('Isi berat badan dulu');
+
+    const perDay = new Map<string, number>();
+    for (const m of meals) {
+      const d = localDate(user.timezone, m.eatenAt);
+      perDay.set(d, (perDay.get(d) ?? 0) + m.totalCalories);
+    }
+    const startMs = Date.parse(`${from}T00:00:00Z`);
+    const formulaTdee =
+      bmr({ sex: profile.sex, age: ageOn(profile.birthDate, today), heightCm: profile.heightCm, weightKg: latest.weightKg }) *
+      ACTIVITY_FACTOR[profile.activityLevel];
+
+    return calibrate({
+      sex: profile.sex,
+      goal: profile.goal,
+      formulaTdee,
+      currentTarget: profile.targetCalories,
+      dailyIntake: [...perDay.values()],
+      burnTotal: burn._sum.caloriesBurned ?? 0,
+      weights: weights.map((w) => ({ day: (w.date.getTime() - startMs) / 86400000, kg: w.weightKg })),
+    });
+  }
+
+  /** Uses the calibrated calories; protein stays, fat 25%, carbs take the rest. */
+  @Post('calibration/apply')
+  async applyCalibration(@CurrentUser() user: AuthUser) {
+    const result = await this.calibration(user);
+    if (result.status !== 'ready') throw new BadRequestException('Data belum cukup untuk kalibrasi');
+    const profile = (await this.prisma.profile.findUnique({ where: { userId: user.id } }))!;
+    const calories = result.suggestedCalories;
+    const fatG = Math.round((calories * 0.25) / 9);
+    const carbsG = Math.max(0, Math.round((calories - profile.targetProteinG * 4 - fatG * 9) / 4));
+    await this.prisma.profile.update({
+      where: { userId: user.id },
+      data: { targetCalories: calories, targetFatG: fatG, targetCarbsG: carbsG, targetsOverridden: true },
+    });
+    return this.get(user);
   }
 }
 

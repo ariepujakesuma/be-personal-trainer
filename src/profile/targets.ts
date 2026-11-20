@@ -26,7 +26,7 @@ const PROTEIN_G_PER_KG: Record<Goal, number> = {
 };
 
 const FAT_SHARE = 0.25;
-const MIN_CALORIES: Record<Sex, number> = { male: 1500, female: 1200 };
+export const MIN_CALORIES: Record<Sex, number> = { male: 1500, female: 1200 };
 
 export interface TargetInput {
   sex: Sex;

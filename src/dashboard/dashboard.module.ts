@@ -125,6 +125,7 @@ export class DashboardService {
       targetCalories: profile.targetCalories,
       targetDeficit: tdee == null ? null : Math.round(tdee - profile.targetCalories),
       targetProteinG: profile.targetProteinG,
+      targetWeightKg: profile.targetWeightKg,
     };
   }
 }
