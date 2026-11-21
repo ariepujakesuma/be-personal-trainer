@@ -7,41 +7,25 @@ import {
   Module,
   Post,
   Query,
+  UnprocessableEntityException,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { AiFailedError, AiModule, AiService } from '../ai/ai.service';
 import { z } from 'zod';
 import { CurrentUser, JwtAuthGuard } from '../common/auth';
 import type { AuthUser } from '../common/auth';
 import { addDays, dateOnly, isDateString, localDate } from '../common/dates';
 import { ZodPipe } from '../common/zod.pipe';
 import { PrismaService } from '../prisma/prisma.service';
+import { SCAN_SYSTEM_PROMPT, normalizeScan, scanSchema } from './scan';
 
 const dateStr = z.string().refine(isDateString, 'Format tanggal YYYY-MM-DD');
 
-/** Optional smart-scale readings, entered manually. `null` clears a value. */
-const metric = (min: number, max: number, int = false) => {
-  const n = z.coerce
-    .number({ error: 'Harus berupa angka' })
-    .min(min, `Minimal ${min}`)
-    .max(max, `Maksimal ${max}`);
-  return (int ? n.int('Harus bilangan bulat') : n).nullable().optional();
-};
-
-export const bodyCompSchema = z.object({
-  bmi: metric(10, 80),
-  bodyFatPct: metric(2, 75),
-  visceralFat: metric(1, 60),
-  muscleKg: metric(5, 150),
-  waterPct: metric(20, 80),
-  obesityDegreePct: metric(-60, 200),
-  bmrKcal: metric(500, 5000, true),
-  metabolicAge: metric(10, 100, true),
-  leanMassKg: metric(10, 250),
-  proteinPct: metric(3, 35),
-  boneMassKg: metric(0.5, 10),
-});
-export type BodyComp = z.infer<typeof bodyCompSchema>;
-export const BODY_COMP_FIELDS = Object.keys(bodyCompSchema.shape) as (keyof BodyComp)[];
+export { BODY_COMP_FIELDS, bodyCompSchema, type BodyComp } from './body-comp';
+import { BODY_COMP_FIELDS, bodyCompSchema, type BodyComp } from './body-comp';
 
 const weightSchema = bodyCompSchema.extend({
   date: dateStr.optional(),
@@ -107,7 +91,47 @@ export class WeightController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly weights: WeightService,
+    private readonly ai: AiService,
   ) {}
+
+  /**
+   * Reads a scale app's screenshot into the form's fields. Nothing is saved: the user checks
+   * the filled form and saves it. The image is not stored either.
+   */
+  @Post('scan')
+  @UseInterceptors(FileInterceptor('photo', { limits: { fileSize: 6 * 1024 * 1024 } }))
+  async scan(@CurrentUser() user: AuthUser, @UploadedFile() file?: Express.Multer.File) {
+    if (!file || !file.mimetype.startsWith('image/'))
+      throw new BadRequestException('Kirim screenshot berupa gambar');
+    try {
+      const { data, model } = await this.ai.chatJson({
+        feature: 'body_comp_scan',
+        model: this.ai.visionModel,
+        userId: user.id,
+        schema: scanSchema,
+        messages: [
+          { role: 'system', content: SCAN_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: `data:${file.mimetype};base64,${file.buffer.toString('base64')}` },
+              },
+            ],
+          },
+        ],
+      });
+      const result = normalizeScan(data);
+      if (result.weightKg == null && !Object.keys(result.values).length)
+        throw new UnprocessableEntityException('Tidak ada angka komposisi tubuh yang terbaca di gambar ini');
+      return { ...result, model };
+    } catch (err) {
+      if (err instanceof AiFailedError)
+        throw new UnprocessableEntityException('Gambar tidak bisa dibaca. Coba screenshot yang lebih jelas.');
+      throw err;
+    }
+  }
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body(new ZodPipe(weightSchema)) body: z.infer<typeof weightSchema>) {
@@ -143,5 +167,10 @@ export class WeightController {
   }
 }
 
-@Module({ controllers: [WeightController], providers: [WeightService], exports: [WeightService] })
+@Module({
+  imports: [AiModule],
+  controllers: [WeightController],
+  providers: [WeightService],
+  exports: [WeightService],
+})
 export class WeightModule {}
