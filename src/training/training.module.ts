@@ -126,10 +126,11 @@ export class TrainingController {
   async today(@CurrentUser() user: AuthUser, @Query('date') date?: string) {
     const day = date ?? localDate(user.timezone);
     if (!isDateString(day)) throw new BadRequestException('Format tanggal YYYY-MM-DD');
-    const plan = await this.loadPlan(user.id);
+    const [plan, logs] = await Promise.all([
+      this.loadPlan(user.id),
+      this.history(user.id, user.timezone, addDays(day, -180), addDays(day, 1)),
+    ]);
     if (!plan) return { date: day, plan: null };
-
-    const logs = await this.history(user.id, user.timezone, addDays(day, -180), addDays(day, 1));
     const onDay = logs.filter((l) => l.date === day);
     const before = logs.filter((l) => l.date < day);
 

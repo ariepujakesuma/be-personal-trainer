@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { z } from 'zod';
-import { CurrentUser, JwtAuthGuard } from '../common/auth';
+import { CurrentUser, JwtAuthGuard, forgetUser } from '../common/auth';
 import type { AuthUser } from '../common/auth';
 import { addDays, ageOn, dayRange, isDateString, localDate } from '../common/dates';
 import { ZodPipe } from '../common/zod.pipe';
@@ -80,6 +80,7 @@ export class ProfileController {
     const weight = await this.weights.latest(user.id, today);
     if (!weight) throw new NotFoundException('Isi berat badan dulu untuk menghitung target');
     if (body.name) await this.prisma.user.update({ where: { id: user.id }, data: { name: body.name } });
+    forgetUser(user.id);
 
     const computed = computeTargets({
       sex: body.sex,
@@ -120,14 +121,13 @@ export class ProfileController {
   /** Target calories suggested from the last 28 days of real intake and weight. */
   @Get('calibration')
   async calibration(@CurrentUser() user: AuthUser) {
-    const profile = await this.prisma.profile.findUnique({ where: { userId: user.id } });
-    if (!profile) throw new NotFoundException('Profil belum diisi');
     const today = localDate(user.timezone);
     const from = addDays(today, -CALIBRATION_WINDOW_DAYS);
     const start = dayRange(from, user.timezone).start;
     const end = dayRange(today, user.timezone).start;
 
-    const [meals, burn, weights, latest] = await Promise.all([
+    const [profile, meals, burn, weights, latest] = await Promise.all([
+      this.prisma.profile.findUnique({ where: { userId: user.id } }),
       this.prisma.meal.findMany({
         where: { userId: user.id, status: 'confirmed', eatenAt: { gte: start, lt: end } },
         select: { eatenAt: true, totalCalories: true },
@@ -145,6 +145,7 @@ export class ProfileController {
       }),
       this.weights.latest(user.id, today),
     ]);
+    if (!profile) throw new NotFoundException('Profil belum diisi');
     if (!latest) throw new NotFoundException('Isi berat badan dulu');
 
     const perDay = new Map<string, number>();

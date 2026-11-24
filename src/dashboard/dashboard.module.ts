@@ -21,11 +21,10 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async day(userId: string, timeZone: string, date: string) {
-    const profile = await this.prisma.profile.findUnique({ where: { userId } });
-    if (!profile) throw new NotFoundException('Profil belum diisi');
     const { start, end } = dayRange(date, timeZone);
-
-    const [meals, exercises, weight, summary] = await Promise.all([
+    // One round of parallel queries: each round trip to the database costs the most here.
+    const [profile, meals, exercises, weight, summary] = await Promise.all([
+      this.prisma.profile.findUnique({ where: { userId } }),
       this.prisma.meal.findMany({
         where: { userId, eatenAt: { gte: start, lt: end } },
         include: { items: true },
@@ -39,6 +38,7 @@ export class DashboardService {
       this.prisma.weightLog.findUnique({ where: { userId_date: { userId, date: dateOnly(date) } } }),
       this.prisma.dailySummary.findUnique({ where: { userId_date: { userId, date: dateOnly(date) } } }),
     ]);
+    if (!profile) throw new NotFoundException('Profil belum diisi');
 
     const confirmed = meals.filter((m) => m.status === 'confirmed');
     const intake = {
@@ -77,13 +77,12 @@ export class DashboardService {
    * unlogged day is unknown, not zero; exercise is averaged over all 7 days.
    */
   async projection(userId: string, timeZone: string) {
-    const profile = await this.prisma.profile.findUnique({ where: { userId } });
-    if (!profile) throw new NotFoundException('Profil belum diisi');
     const today = localDate(timeZone);
     const start = dayRange(addDays(today, -7), timeZone).start;
     const end = dayRange(today, timeZone).start;
 
-    const [weight, comp, meals, burn] = await Promise.all([
+    const [profile, weight, comp, meals, burn] = await Promise.all([
+      this.prisma.profile.findUnique({ where: { userId } }),
       this.prisma.weightLog.findFirst({ where: { userId }, orderBy: { date: 'desc' } }),
       this.prisma.weightLog.findFirst({
         where: { userId, bodyFatPct: { not: null } },
@@ -98,6 +97,7 @@ export class DashboardService {
         _sum: { caloriesBurned: true },
       }),
     ]);
+    if (!profile) throw new NotFoundException('Profil belum diisi');
 
     const loggedDays = new Set(meals.map((m) => localDate(timeZone, m.eatenAt))).size;
     const missing: ('bodyComposition' | 'meals')[] = [];
