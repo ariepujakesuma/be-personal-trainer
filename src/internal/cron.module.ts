@@ -104,7 +104,8 @@ export class CronController {
   @Get('daily-summary')
   async dailySummary(@Query('date') onlyDate?: string) {
     // ?date=YYYY-MM-DD reruns a past day by hand (testing, or a missed run) without touching today.
-    if (onlyDate !== undefined && !isDateString(onlyDate)) throw new BadRequestException('Format tanggal YYYY-MM-DD');
+    if (onlyDate !== undefined && !isDateString(onlyDate))
+      throw new BadRequestException('Format tanggal YYYY-MM-DD');
     const users = await this.prisma.user.findMany({
       where: { profile: { isNot: null } },
       select: { id: true, email: true, name: true, timezone: true, profile: true },
