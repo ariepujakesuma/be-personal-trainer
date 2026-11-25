@@ -15,6 +15,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { dateOnly, dayRange, localDate } from '../common/dates';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../reminder/mail.service';
+import type { DailySummaryAi } from '../ai/schemas';
+import { DashboardModule, DashboardService } from '../dashboard/dashboard.module';
 import { SummaryModule, SummaryService } from '../summary/summary.module';
 
 /** Vercel Cron sends `Authorization: Bearer $CRON_SECRET` as a GET request. */
@@ -24,7 +26,13 @@ export class CronGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest<Request>();
-    const expected = Buffer.from(`Bearer ${this.config.getOrThrow<string>('CRON_SECRET')}`);
+    const secret = this.config.get<string>('CRON_SECRET');
+    if (!secret) {
+      // Without it Vercel sends no Authorization header and every scheduled run is refused.
+      new Logger(CronGuard.name).error('CRON_SECRET is not set: scheduled jobs cannot run');
+      throw new UnauthorizedException();
+    }
+    const expected = Buffer.from(`Bearer ${secret}`);
     const actual = Buffer.from(req.headers.authorization ?? '');
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
       throw new UnauthorizedException();
@@ -41,6 +49,7 @@ export class CronController {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly summaries: SummaryService,
+    private readonly dashboard: DashboardService,
   ) {}
 
   private async hasLogToday(userId: string, timeZone: string, date: string) {
@@ -85,35 +94,74 @@ export class CronController {
     return { checked: users.length, sent, failed };
   }
 
-  /** F7: 21:00 WIB, generate summaries for users who logged today. */
+  /**
+   * F7: 21:00 WIB (on the Hobby plan Vercel runs it any time in that hour). Generates the
+   * summary for users who logged today and emails it to those with daily email on.
+   * Users run a few at a time, so one slow AI call cannot push the run past its time limit.
+   */
   @Get('daily-summary')
   async dailySummary() {
     const users = await this.prisma.user.findMany({
       where: { profile: { isNot: null } },
-      select: { id: true, timezone: true },
+      select: { id: true, email: true, name: true, timezone: true, profile: true },
     });
-    let generated = 0;
-    let failed = 0;
-    for (const user of users) {
+    const result = { checked: users.length, generated: 0, emailed: 0, failed: 0 };
+
+    await inBatches(users, 4, async (user) => {
+      const profile = user.profile!;
       const date = localDate(user.timezone);
-      const exists = await this.prisma.dailySummary.findUnique({
-        where: { userId_date: { userId: user.id, date: dateOnly(date) } },
-      });
-      if (exists || !(await this.hasLogToday(user.id, user.timezone, date))) continue;
       try {
-        await this.summaries.generate(user, date);
-        generated++;
+        let summary = await this.prisma.dailySummary.findUnique({
+          where: { userId_date: { userId: user.id, date: dateOnly(date) } },
+        });
+        if (!summary) {
+          if (!(await this.hasLogToday(user.id, user.timezone, date))) return;
+          summary = await this.summaries.generate(user, date);
+          result.generated++;
+        }
+        if (!profile.emailReminderEnabled) return;
+        const already = await this.prisma.notificationLog.findUnique({
+          where: { userId_type_date: { userId: user.id, type: 'daily_summary_email', date: dateOnly(date) } },
+        });
+        if (already) return;
+        const ai = summary.aiJson as unknown as DailySummaryAi;
+        const day = await this.dashboard.day(user.id, user.timezone, date);
+        let status = 'sent';
+        try {
+          await this.mail.sendDailySummary(user, {
+            date,
+            ...ai,
+            intakeKcal: day.intake.calories,
+            targetKcal: day.targets.calories + day.burn,
+            burnKcal: day.burn,
+            proteinG: day.intake.proteinG,
+            targetProteinG: day.targets.proteinG,
+          });
+          result.emailed++;
+        } catch (err) {
+          status = 'failed';
+          this.logger.error(`Summary email to ${user.email} failed: ${(err as Error).message}`);
+        }
+        await this.prisma.notificationLog.create({
+          data: { userId: user.id, type: 'daily_summary_email', date: dateOnly(date), status },
+        });
       } catch (err) {
-        failed++;
+        result.failed++;
         this.logger.error(`Summary for ${user.id} failed: ${(err as Error).message}`);
       }
-    }
-    return { checked: users.length, generated, failed };
+    });
+    this.logger.log(`daily-summary ${JSON.stringify(result)}`);
+    return result;
   }
 }
 
+/** Runs `fn` over `items`, `size` at a time. */
+async function inBatches<T>(items: T[], size: number, fn: (item: T) => Promise<void>) {
+  for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
+}
+
 @Module({
-  imports: [SummaryModule],
+  imports: [SummaryModule, DashboardModule],
   controllers: [CronController],
   providers: [CronGuard, MailService],
 })
