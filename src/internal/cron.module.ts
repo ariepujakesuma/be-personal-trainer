@@ -2,17 +2,19 @@ import {
   CanActivate,
   Controller,
   ExecutionContext,
+  BadRequestException,
   Get,
   Injectable,
   Logger,
   Module,
+  Query,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { timingSafeEqual } from 'node:crypto';
-import { dateOnly, dayRange, localDate } from '../common/dates';
+import { dateOnly, dayRange, isDateString, localDate } from '../common/dates';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../reminder/mail.service';
 import type { DailySummaryAi } from '../ai/schemas';
@@ -100,7 +102,9 @@ export class CronController {
    * Users run a few at a time, so one slow AI call cannot push the run past its time limit.
    */
   @Get('daily-summary')
-  async dailySummary() {
+  async dailySummary(@Query('date') onlyDate?: string) {
+    // ?date=YYYY-MM-DD reruns a past day by hand (testing, or a missed run) without touching today.
+    if (onlyDate !== undefined && !isDateString(onlyDate)) throw new BadRequestException('Format tanggal YYYY-MM-DD');
     const users = await this.prisma.user.findMany({
       where: { profile: { isNot: null } },
       select: { id: true, email: true, name: true, timezone: true, profile: true },
@@ -109,7 +113,7 @@ export class CronController {
 
     await inBatches(users, 4, async (user) => {
       const profile = user.profile!;
-      const date = localDate(user.timezone);
+      const date = onlyDate ?? localDate(user.timezone);
       try {
         let summary = await this.prisma.dailySummary.findUnique({
           where: { userId_date: { userId: user.id, date: dateOnly(date) } },
